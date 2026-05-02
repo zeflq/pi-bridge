@@ -1,0 +1,17 @@
+{
+  "name": "pi-bridge",
+  "version": "0.1.0",
+  "description": "Transparent filesystem bridge that makes pi run natively on a remote machine",
+  "type": "commonjs",
+  "main": "src/local/preload.js",
+  "scripts": {
+    "test": "vitest --run",
+    "dev": "node dev.js"
+  },
+  "devDependencies": {
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
