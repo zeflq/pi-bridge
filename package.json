@@ -1,17 +1,33 @@
 {
   "name": "pi-bridge",
   "version": "0.1.1",
-  "description": "Transparent filesystem bridge that makes pi run natively on a remote machine",
+  "description": "Transparent filesystem bridge that makes pi run natively on a remote machine over SSH",
   "type": "commonjs",
-  "main": "src/local/preload.js",
+  "bin": {
+    "pii": "bin/pii.js"
+  },
+  "files": [
+    "bin/",
+    "src/"
+  ],
   "scripts": {
     "test": "vitest --run",
     "dev": "node dev.js"
   },
-  "devDependencies": {
-    "vitest": "^2.0.0"
-  },
   "engines": {
     "node": ">=18.0.0"
+  },
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent",
+    "ssh",
+    "bridge",
+    "remote",
+    "filesystem"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "vitest": "^2.0.0"
   }
 }

@@ -6,7 +6,7 @@ Pi runs on your local machine (needs internet for auth and Claude API). Your pro
 
 ## Prerequisites
 
-- Node.js on the **local** machine (already required by pi)
+- Node.js ≥ 18 on the **local** machine
 - Node.js on the **remote** machine
 - SSH access to the remote machine with key-based auth (no password prompt)
 - `pi` installed locally
@@ -14,53 +14,7 @@ Pi runs on your local machine (needs internet for auth and Claude API). Your pro
 ## Installation
 
 ```bash
-git clone https://github.com/zeflq/pi-bridge ~/.pi-bridge
-cd ~/.pi-bridge
-npm install
-```
-
-## Setup
-
-### macOS / Linux
-
-Add to your shell profile (`~/.zshrc` or `~/.bashrc`):
-
-```bash
-alias pii='node --require ~/.pi-bridge/src/local/preload.js $(which pi)'
-```
-
-Reload your shell:
-
-```bash
-source ~/.zshrc   # or ~/.bashrc
-```
-
-### Windows (PowerShell)
-
-Add to your PowerShell profile (`$PROFILE`):
-
-```powershell
-function pii {
-    # Get-Command returns the .ps1 wrapper — resolve the actual .js entry point
-    $piJs = [System.IO.Path]::ChangeExtension((Get-Command pi -ErrorAction Stop).Source, '.js')
-    node --require "$HOME\.pi-bridge\src\local\preload.js" $piJs @args
-}
-```
-
-Reload your profile:
-
-```powershell
-. $PROFILE
-```
-
-### Windows (CMD / batch)
-
-Create a `pii.cmd` file somewhere on your `PATH`:
-
-```bat
-@echo off
-for /f "delims=" %%i in ('where pi') do set PI_PATH=%%i
-node --require "%USERPROFILE%\.pi-bridge\src\local\preload.js" "%PI_PATH%" %*
+npm install -g pi-bridge
 ```
 
 ## Usage
@@ -80,27 +34,34 @@ pii --ssh user@host:~/projects/my-app
 
 Everything works natively — pi discovers `AGENTS.md`, skills, and context files on the remote without any extra flags or extensions.
 
+## Updating
+
+```bash
+npm update -g pi-bridge
+```
+
 ## How It Works
 
 ```
 Local machine                          Remote (Linux)
 ─────────────────────────────          ──────────────────────
-preload.js (--require)
-  ├─ upload server bundle via SSH
-  ├─ start HTTP server on remote
-  │    → prints PORT:TOKEN to stdout
-  ├─ SSH port forward localhost:PORT
-  ├─ create fake local dir:
-  │    /tmp/pi-bridge/root/projects/my-app
-  ├─ process.chdir(fakeLocalCwd)
-  ├─ strip --ssh from process.argv
-  ├─ patch fs.*  (sync + promises)     remote/index.js
-  └─ patch child_process.*               listens on 127.0.0.1:PORT
-                                         validates token
-pi loads — unaware of bridge            restricts to remoteCwd
-  fs.readFileSync(...)  ──GET──→        reads real remote files
-  fs.readdirSync(...)   ──GET──→        ← returns data
-  spawn('git', ...)     ──SSH──→        runs on remote
+pii (bin/pii.js)
+  └─ node --require preload.js pi
+       ├─ upload server bundle via SSH
+       ├─ start HTTP server on remote
+       │    → prints PORT:TOKEN:PID to stdout
+       ├─ SSH port forward localhost:PORT
+       ├─ create fake local dir:
+       │    /tmp/pi-bridge/root/projects/my-app
+       ├─ process.chdir(fakeLocalCwd)
+       ├─ strip --ssh from process.argv
+       ├─ patch fs.*  (sync + promises)     remote/index.js
+       └─ patch child_process.*               listens on 127.0.0.1:PORT
+                                              validates token
+pi loads — unaware of bridge               restricts to remoteCwd
+  fs.readFileSync(...)  ──GET──→           reads real remote files
+  fs.readdirSync(...)   ──GET──→           ← returns data
+  spawn('git', ...)     ──SSH──→           runs on remote
   → finds AGENTS.md ✓
   → finds skills ✓
   → git branch in footer ✓
@@ -128,6 +89,12 @@ pi loads — unaware of bridge            restricts to remoteCwd
 
 ## Development
 
+```bash
+git clone https://github.com/zeflq/pi-bridge
+cd pi-bridge
+npm install
+```
+
 Test against a real remote without installing pi:
 
 ```bash
@@ -154,3 +121,6 @@ The fake local directory (`/tmp/pi-bridge/…`) is intentionally empty — all r
 
 **Branch name not updating**
 The footer polls `.git` every second. Switching branches from outside a pi session is reflected within ~1s. If the branch is stuck, restart `pii`.
+
+**Windows: `pii` can't find `pi`**
+Ensure the OpenSSH client is enabled (Windows 10+: Settings → Apps → Optional Features → OpenSSH Client) and `pi` is installed globally (`npm install -g pi`).
