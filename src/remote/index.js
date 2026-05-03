@@ -26,8 +26,9 @@ function startServer(remoteCwd) {
 
   server.listen(0, '127.0.0.1', () => {
     const port = server.address().port;
-    // Print PORT:TOKEN to stdout so the local preload can capture it
-    process.stdout.write(port + ':' + token + '\n');
+    // Print PORT:TOKEN:PID to stdout so the local preload can capture it.
+    // PID is used by cleanup to kill this specific server process on exit.
+    process.stdout.write(port + ':' + token + ':' + process.pid + '\n');
   });
 
   return server;

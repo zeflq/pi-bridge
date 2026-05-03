@@ -54,7 +54,7 @@ try {
   throw new Error('pi-bridge: Failed to parse setup output: ' + setupResult.stdout);
 }
 
-const { port, token } = config;
+const { port, token, sessionId, remotePid } = config;
 
 // --- Step 3: Create fake local directory ---
 const { fakeRoot, fakeLocalCwd } = createFakeDir(remoteCwd);
@@ -70,4 +70,4 @@ patchFs(fakeRoot, port, token);
 patchChildProcess(fakeRoot, remote);
 
 // --- Step 7: Register cleanup ---
-registerCleanup({ fakeRoot, tunnelProcess, remote });
+registerCleanup({ fakeRoot, tunnelProcess, remote, sessionId, remotePid });

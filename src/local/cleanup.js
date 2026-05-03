@@ -9,16 +9,20 @@ const { sshExecSync } = require('./ssh');
  * Cleanup actions (best-effort — errors are suppressed):
  *   1. Remove the fake local directory
  *   2. Kill the SSH tunnel process
- *   3. Delete the remote server script via SSH
+ *   3. Kill the remote server process (by PID) and remove its log file
+ *
+ * Each session has a unique sessionId so its log file does not clash with
+ * other sessions targeting the same remote working directory.
  *
  * @param {object} opts
- * @param {string} opts.fakeRoot        - Local fake root path to remove
- * @param {import('child_process').ChildProcess} opts.tunnelProcess - SSH tunnel child process
- * @param {string} opts.remote          - SSH target, e.g. 'user@host'
- * @param {string} [opts.remoteScript]  - Remote script path (default: /tmp/pi-bridge-server.js)
+ * @param {string}   opts.fakeRoot      - Local fake root path to remove
+ * @param {object}   opts.tunnelProcess - SSH tunnel watchdog handle ({ kill() })
+ * @param {string}   opts.remote        - SSH target, e.g. 'user@host'
+ * @param {string}   opts.sessionId     - Random 8-char hex ID for this session
+ * @param {number}   opts.remotePid     - PID of the remote server process
  */
-function registerCleanup({ fakeRoot, tunnelProcess, remote, remoteScript }) {
-  const scriptPath = remoteScript || '/tmp/pi-bridge-server.js';
+function registerCleanup({ fakeRoot, tunnelProcess, remote, sessionId, remotePid }) {
+  const remoteLog = sessionId ? '/tmp/pi-bridge-out-' + sessionId + '.txt' : null;
 
   function cleanup() {
     // 1. Remove fake local directory
@@ -26,27 +30,25 @@ function registerCleanup({ fakeRoot, tunnelProcess, remote, remoteScript }) {
       removeFakeDir(fakeRoot);
     }
 
-    // 2. Kill tunnel (supports both raw ChildProcess and the { kill() } watchdog handle)
+    // 2. Kill tunnel watchdog
     if (tunnelProcess) {
       try {
         if (typeof tunnelProcess.kill === 'function') tunnelProcess.kill();
-      } catch (_) {
-        // Ignore
-      }
+      } catch (_) {}
     }
 
-    // 3. Delete remote server script
+    // 3. Kill the specific remote server process and clean up its log file
     if (remote) {
       try {
-        sshExecSync(remote, 'rm -f ' + scriptPath);
-      } catch (_) {
-        // Ignore — cleanup is best-effort
-      }
+        let cmd = '';
+        if (remotePid) cmd += 'kill ' + remotePid + ' 2>/dev/null; ';
+        if (remoteLog) cmd += 'rm -f ' + remoteLog;
+        if (cmd) sshExecSync(remote, cmd);
+      } catch (_) {}
     }
   }
 
   process.on('exit', cleanup);
-  // Also handle SIGINT / SIGTERM so Ctrl-C triggers cleanup
   process.on('SIGINT', () => process.exit(130));
   process.on('SIGTERM', () => process.exit(143));
 }
