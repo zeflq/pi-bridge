@@ -40,6 +40,17 @@ function patchChildProcess(fakeRoot, remote) {
   }
 
   /**
+   * Returns true for commands that must always run locally, never over SSH.
+   * - node / node.exe: pi's internal tooling (session export, compaction, …)
+   *   spawns Node with large payloads as args; redirecting those over SSH would
+   *   produce an ENAMETOOLONG error on Windows and is never correct anyway.
+   */
+  function isLocalOnly(file) {
+    const name = normalizeCmd(file).toLowerCase();
+    return name === 'node';
+  }
+
+  /**
    * Build the SSH-redirected command: cd to remote cwd, then run the
    * original command with its arguments, all shell-quoted.
    */
@@ -65,7 +76,7 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot)) return origSpawn(file, args, opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawn(file, args, opts);
 
     return origSpawn('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -77,7 +88,7 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot)) return origSpawnSync(file, args, opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawnSync(file, args, opts);
 
     return origSpawnSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
