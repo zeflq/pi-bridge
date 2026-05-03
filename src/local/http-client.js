@@ -18,6 +18,39 @@ const { execFileSync } = require('child_process');
  * @returns {string}       - Response body as a UTF-8 string
  * @throws                 - On HTTP errors or non-2xx status codes
  */
+const MAX_RETRIES = 5;
+const RETRY_DELAY_MS = 600;
+
+/**
+ * Run execFileSync with retries when the tunnel is reconnecting after sleep/wake.
+ * ECONNREFUSED (status 0, body contains "ECONNREFUSED") means the tunnel is not
+ * yet back up — wait and retry.
+ */
+function defaultSleep() {
+  try {
+    execFileSync(process.execPath, ['-e', `setTimeout(()=>{},${RETRY_DELAY_MS})`], {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+  } catch (_) {}
+}
+
+/**
+ * @param {() => string} fn    - Returns a JSON envelope string
+ * @param {() => void}  sleep  - Injected sleep (defaults to real delay; override in tests)
+ */
+function withRetry(fn, sleep) {
+  sleep = sleep || defaultSleep;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    const raw = fn();
+    const result = JSON.parse(raw);
+    const isConnRefused = !result.ok && result.status === 0 &&
+      typeof result.body === 'string' && result.body.includes('ECONNREFUSED');
+    if (!isConnRefused || attempt === MAX_RETRIES) return raw;
+    sleep();
+  }
+}
+
 function httpGet(port, token, urlPath) {
   const script = `
 const http = require('http');
@@ -39,7 +72,7 @@ req.on('error', (e) => {
   process.stdout.write(JSON.stringify({ ok: false, status: 0, body: e.message }));
 });
 `;
-  const raw = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const raw = withRetry(() => execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
   const result = JSON.parse(raw);
   if (!result.ok) {
     const err = new Error('HTTP ' + result.status + ': ' + result.body);
@@ -84,7 +117,7 @@ req.on('error', (e) => {
 req.write(bodyBuf);
 req.end();
 `;
-  const raw = execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+  const raw = withRetry(() => execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
   const result = JSON.parse(raw);
   if (!result.ok) {
     const err = new Error('HTTP ' + result.status + ': ' + result.body);
@@ -94,4 +127,4 @@ req.end();
   return result.body;
 }
 
-module.exports = { httpGet, httpPost };
+module.exports = { httpGet, httpPost, _withRetry: withRetry, _MAX_RETRIES: MAX_RETRIES };

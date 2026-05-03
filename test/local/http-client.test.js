@@ -7,7 +7,7 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const { httpGet, httpPost } = require('../../src/local/http-client.js');
+const { httpGet, httpPost, _withRetry, _MAX_RETRIES } = require('../../src/local/http-client.js');
 
 const TOKEN = 'test-token-for-http-client';
 let serverProcess;
@@ -104,5 +104,76 @@ describe('http-client.js', () => {
     it('throws on 401 (wrong token)', () => {
       expect(() => httpPost(port, 'bad-token', '/echo', 'x')).toThrow();
     });
+  });
+});
+
+// ── withRetry ────────────────────────────────────────────────────────────────
+
+describe('withRetry()', () => {
+  const noop = () => {};
+  const connRefused = (msg = 'connect ECONNREFUSED 127.0.0.1:9') =>
+    JSON.stringify({ ok: false, status: 0, body: msg });
+  const success = (body = 'ok') =>
+    JSON.stringify({ ok: true, status: 200, body });
+
+  it('returns immediately when fn succeeds on first attempt', () => {
+    let calls = 0;
+    const raw = _withRetry(() => { calls++; return success(); }, noop);
+    expect(JSON.parse(raw).body).toBe('ok');
+    expect(calls).toBe(1);
+  });
+
+  it('retries on ECONNREFUSED and returns first success', () => {
+    let calls = 0;
+    const fn = () => {
+      calls++;
+      return calls < 3 ? connRefused() : success('recovered');
+    };
+    const raw = _withRetry(fn, noop);
+    expect(JSON.parse(raw).body).toBe('recovered');
+    expect(calls).toBe(3);
+  });
+
+  it('calls sleep between retries', () => {
+    let sleeps = 0;
+    let calls = 0;
+    const fn = () => { calls++; return calls < 3 ? connRefused() : success(); };
+    _withRetry(fn, () => sleeps++);
+    expect(sleeps).toBe(2);
+  });
+
+  it('stops after MAX_RETRIES and returns the last ECONNREFUSED result', () => {
+    let calls = 0;
+    const raw = _withRetry(() => { calls++; return connRefused(); }, noop);
+    expect(calls).toBe(_MAX_RETRIES + 1);
+    expect(JSON.parse(raw).ok).toBe(false);
+  });
+
+  it('does not retry on non-ECONNREFUSED errors (e.g. 401)', () => {
+    let calls = 0;
+    const fn = () => { calls++; return JSON.stringify({ ok: false, status: 401, body: 'Unauthorized' }); };
+    const raw = _withRetry(fn, noop);
+    expect(calls).toBe(1);
+    expect(JSON.parse(raw).status).toBe(401);
+  });
+
+  it('does not retry on 500 server errors', () => {
+    let calls = 0;
+    const fn = () => { calls++; return JSON.stringify({ ok: false, status: 500, body: 'Internal error' }); };
+    _withRetry(fn, noop);
+    expect(calls).toBe(1);
+  });
+
+  it('detects ECONNREFUSED regardless of surrounding text', () => {
+    let calls = 0;
+    const fn = () => {
+      calls++;
+      return calls < 2
+        ? JSON.stringify({ ok: false, status: 0, body: 'connect ECONNREFUSED ::1:9999' })
+        : success();
+    };
+    const raw = _withRetry(fn, noop);
+    expect(JSON.parse(raw).ok).toBe(true);
+    expect(calls).toBe(2);
   });
 });

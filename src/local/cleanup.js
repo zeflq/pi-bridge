@@ -26,10 +26,10 @@ function registerCleanup({ fakeRoot, tunnelProcess, remote, remoteScript }) {
       removeFakeDir(fakeRoot);
     }
 
-    // 2. Kill tunnel process
-    if (tunnelProcess && !tunnelProcess.killed) {
+    // 2. Kill tunnel (supports both raw ChildProcess and the { kill() } watchdog handle)
+    if (tunnelProcess) {
       try {
-        tunnelProcess.kill('SIGTERM');
+        if (typeof tunnelProcess.kill === 'function') tunnelProcess.kill();
       } catch (_) {
         // Ignore
       }

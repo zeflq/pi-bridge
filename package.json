@@ -1,6 +1,6 @@
 {
   "name": "pi-bridge",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Transparent filesystem bridge that makes pi run natively on a remote machine",
   "type": "commonjs",
   "main": "src/local/preload.js",
