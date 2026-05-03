@@ -30,10 +30,21 @@ function patchChildProcess(fakeRoot, remote) {
   }
 
   /**
+   * On Windows, pi may call spawn with a full exe path like
+   * C:\Program Files\Git\bin\bash.exe. Strip it to the bare command name
+   * ('bash') so the remote Linux shell can find it.
+   */
+  function normalizeCmd(file) {
+    if (process.platform !== 'win32') return file;
+    return path.basename(String(file)).replace(/\.exe$/i, '');
+  }
+
+  /**
    * Build the SSH-redirected command: cd to remote cwd, then run the
    * original command with its arguments, all shell-quoted.
    */
   function buildSshArgs(file, args, opts) {
+    file = normalizeCmd(file);
     const fakeCwd    = effectiveCwd(opts);
     const remoteCwd  = toRemotePath(fakeCwd, fakeRoot);
 

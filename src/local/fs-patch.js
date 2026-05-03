@@ -38,6 +38,15 @@ function makeEisdir(p) {
   );
 }
 
+/**
+ * Returns true if the path looks like a bash executable.
+ * Used on Windows to fake bash presence so pi's shell-detection passes.
+ */
+function isBashPath(p) {
+  const n = String(p).replace(/\\/g, '/').toLowerCase();
+  return n.endsWith('/bash.exe') || n.endsWith('/bash') || n === '/bin/bash';
+}
+
 function rethrowRemote(e, p) {
   if (!e || !e.message) throw e;
   if (e.message.includes('403')) throw makeEnoent(p);
@@ -176,6 +185,11 @@ function patchFs(fakeRoot, port, token) {
 
   fs.existsSync = function patchedExistsSync(p) {
     const s = abs(p);
+    // On Windows, pi checks for bash locally before using the shell tool.
+    // The check never reaches our SSH bridge (it's just an existsSync call).
+    // Fake it so pi believes bash is available; the actual spawn is intercepted
+    // and the Windows exe path is normalised to 'bash' before going over SSH.
+    if (process.platform === 'win32' && isBashPath(s)) return true;
     if (!s || !isFakePath(s, fakeRoot)) return orig.existsSync(p);
     try {
       return httpGet(port, token, '/exists?path=' + encodeURIComponent(rpath(s))).trim() === '1';
