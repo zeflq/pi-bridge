@@ -1,6 +1,6 @@
 {
   "name": "pi-bridge",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "description": "Transparent filesystem bridge that makes pi run natively on a remote machine over SSH",
   "type": "commonjs",
   "bin": {

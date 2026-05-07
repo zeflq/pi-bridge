@@ -57,7 +57,7 @@ try {
 const { port, token, sessionId, remotePid } = config;
 
 // --- Step 3: Create fake local directory ---
-const { fakeRoot, fakeLocalCwd } = createFakeDir(remote, remoteCwd);
+const { fakeRoot, fakeLocalCwd } = createFakeDir(remoteCwd);
 
 // --- Step 4: Change working directory to fake local cwd ---
 process.chdir(fakeLocalCwd);

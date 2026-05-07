@@ -9,32 +9,20 @@ const path = require('path');
 const origRmSync = fs.rmSync.bind(fs);
 
 /**
- * Sanitise an SSH target string (user@host or alias) into a safe dir name.
- */
-function sanitizeRemote(remote) {
-  return remote.replace(/[^a-zA-Z0-9._-]/g, '_');
-}
-
-/**
  * Create the fake local directory skeleton for the given remote path.
- *
- * The directory lives under ~/.pi-bridge/<remote>/ rather than the OS temp
- * directory so it survives reboots — this prevents pi's session-cwd check
- * from failing when it tries to resume a previous session whose cwd points
- * at a directory that was cleaned up between runs.
+ * The structure mirrors the remote path so that path-mapper can convert
+ * between fake local paths and remote paths deterministically.
  *
  * Example:
- *   remote    = 'myserver'
  *   remoteCwd = '/root/project-x'
- *   fakeRoot  = '~/.pi-bridge/myserver'
- *   fakeLocalCwd = '~/.pi-bridge/myserver/root/project-x'
+ *   fakeRoot  = '/tmp/pi-bridge'
+ *   fakeLocalCwd = '/tmp/pi-bridge/root/project-x'
  *
- * @param {string} remote    - SSH target, e.g. 'user@host' or alias
  * @param {string} remoteCwd - Absolute remote path, e.g. '/root/project-x'
  * @returns {{ fakeRoot: string, fakeLocalCwd: string }}
  */
-function createFakeDir(remote, remoteCwd) {
-  const fakeRootRaw = path.join(os.homedir(), '.pi-bridge', sanitizeRemote(remote));
+function createFakeDir(remoteCwd) {
+  const fakeRootRaw = path.join(os.tmpdir(), 'pi-bridge');
 
   // Build the local mirror path from the remote path segments
   const segments = remoteCwd.split('/').filter(Boolean);

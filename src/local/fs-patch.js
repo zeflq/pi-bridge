@@ -192,10 +192,15 @@ function patchFs(fakeRoot, port, token) {
     if (process.platform === 'win32' && isBashPath(s)) return true;
     if (!s || !isFakePath(s, fakeRoot)) return orig.existsSync(p);
     try {
-      return httpGet(port, token, '/exists?path=' + encodeURIComponent(rpath(s))).trim() === '1';
+      const remoteExists = httpGet(port, token, '/exists?path=' + encodeURIComponent(rpath(s))).trim() === '1';
+      // Also check locally: the fake dir root always exists on disk (pi-bridge
+      // creates it in preload). This lets pi's session-cwd check pass even when
+      // Node.js 24's ESM existsSync bypasses our patch and the remote check
+      // returns an unexpected result for the project root directory.
+      return remoteExists || orig.existsSync(p);
     } catch (e) {
       if (e.message && (e.message.includes('403') || e.message.includes('ENOENT'))) return false;
-      throw e;
+      return orig.existsSync(p);
     }
   };
 
