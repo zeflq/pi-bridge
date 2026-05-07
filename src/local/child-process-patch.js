@@ -47,7 +47,7 @@ function patchChildProcess(fakeRoot, remote) {
    */
   function isLocalOnly(file) {
     const name = normalizeCmd(file).toLowerCase();
-    return name === 'node';
+    return name === 'node' || name === 'pi' || name === 'pii';
   }
 
   /**

@@ -1,6 +1,6 @@
 {
   "name": "pi-bridge",
-  "version": "0.2.6",
+  "version": "0.2.8",
   "description": "Transparent filesystem bridge that makes pi run natively on a remote machine over SSH",
   "type": "commonjs",
   "bin": {
@@ -27,6 +27,14 @@
     "filesystem"
   ],
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zeflq/pi-bridge.git"
+  },
+  "homepage": "https://github.com/zeflq/pi-bridge#readme",
+  "bugs": {
+    "url": "https://github.com/zeflq/pi-bridge/issues"
+  },
   "devDependencies": {
     "vitest": "^2.0.0"
   }

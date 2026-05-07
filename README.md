@@ -52,7 +52,7 @@ pii (bin/pii.js)
        │    → prints PORT:TOKEN:PID to stdout
        ├─ SSH port forward localhost:PORT
        ├─ create fake local dir:
-       │    /tmp/pi-bridge/root/projects/my-app
+       │    <home>/.pi-bridge/myserver/root/projects/my-app
        ├─ process.chdir(fakeLocalCwd)
        ├─ strip --ssh from process.argv
        ├─ patch fs.*  (sync + promises)     remote/index.js
@@ -67,6 +67,8 @@ pi loads — unaware of bridge               restricts to remoteCwd
   → git branch in footer ✓
 ```
 
+The fake local directory lives under `<home>/.pi-bridge/<remote>/` (not the OS temp directory) so it survives reboots and pi can always resume sessions correctly. On Windows this is `%USERPROFILE%\.pi-bridge\`; on macOS/Linux it is `~/.pi-bridge/`.
+
 ## What Gets Patched
 
 | API | Covered |
@@ -76,6 +78,8 @@ pi loads — unaware of bridge               restricts to remoteCwd
 | `fs/promises` module (ES module static imports) | ✓ |
 | `child_process.spawn` / `spawnSync` — runs in remote cwd via SSH | ✓ |
 | `fs.watch` / `fs.watchFile` — polls remote via HTTP (git branch updates) | ✓ |
+
+`node`, `pi`, and `pii` spawns are always kept local — they need internet access and must never be redirected over SSH.
 
 ## Security
 
@@ -117,7 +121,7 @@ Host myserver
 ```
 
 **Files show as empty / ENOENT**
-The fake local directory (`/tmp/pi-bridge/…`) is intentionally empty — all reads go to the remote. If you see ENOENT, the bridge may not have started correctly. Check that Node.js is available on the remote (`node --version`).
+The fake local directory (`<home>/.pi-bridge/<remote>/…`) is intentionally empty — all reads go to the remote. If you see ENOENT, the bridge may not have started correctly. Check that Node.js is available on the remote (`node --version`).
 
 **Branch name not updating**
 The footer polls `.git` every second. Switching branches from outside a pi session is reflected within ~1s. If the branch is stuck, restart `pii`.
