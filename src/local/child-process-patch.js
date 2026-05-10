@@ -35,7 +35,7 @@ function patchChildProcess(fakeRoot, remote) {
    */
   function normalizeCmd(file) {
     if (process.platform !== 'win32') return file;
-    return path.basename(String(file)).replace(/\.exe$/i, '');
+    return path.basename(String(file)).replace(/\.(exe|cmd|ps1|bat)$/i, '');
   }
 
   /**
@@ -77,6 +77,10 @@ function patchChildProcess(fakeRoot, remote) {
     return ['-o', 'BatchMode=yes', remote, remoteCmd];
   }
 
+  function dbg(method, label, cwd, decision) {
+    process.stderr.write('[pi-bridge] ' + method + ' | ' + label + ' | cwd=' + cwd + ' | ' + decision + '\n');
+  }
+
   // ── spawn ────────────────────────────────────────────────────────────────────
 
   cp.spawn = function patchedSpawn(file, args, opts) {
@@ -84,7 +88,10 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawn(file, args, opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    const local = isLocalOnly(file);
+    dbg('spawn', file, cwd, fake ? (local ? 'LOCAL(isLocalOnly)' : 'SSH') : 'LOCAL(notFake)');
+    if (!fake || local) return origSpawn(file, args, opts);
 
     return origSpawn('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -96,7 +103,10 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawnSync(file, args, opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    const local = isLocalOnly(file);
+    dbg('spawnSync', file, cwd, fake ? (local ? 'LOCAL(isLocalOnly)' : 'SSH') : 'LOCAL(notFake)');
+    if (!fake || local) return origSpawnSync(file, args, opts);
 
     return origSpawnSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -107,7 +117,14 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot)) return origExecSync(command, opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    if (!fake) { dbg('execSync', command.slice(0, 60), cwd, 'LOCAL(notFake)'); return origExecSync(command, opts); }
+
+    const firstToken = String(command).trimStart().split(/\s+/)[0];
+    const firstTokenBase = firstToken.replace(/\.(exe|cmd|ps1|bat)$/i, '');
+    const local = isLocalOnly(firstToken) || (firstTokenBase !== firstToken && isLocalOnly(firstTokenBase));
+    dbg('execSync', command.slice(0, 60), cwd, local ? 'LOCAL(isLocalOnly)' : 'SSH');
+    if (local) return origExecSync(command, opts);
 
     return origExecFileSync('ssh', buildSshArgsForShell(command, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -119,7 +136,10 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origExecFileSync(file, args, opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    const local = isLocalOnly(file);
+    dbg('execFileSync', file, cwd, fake ? (local ? 'LOCAL(isLocalOnly)' : 'SSH') : 'LOCAL(notFake)');
+    if (!fake || local) return origExecFileSync(file, args, opts);
 
     return origExecFileSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
