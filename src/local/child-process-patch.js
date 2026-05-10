@@ -13,9 +13,11 @@ const { isFakePath, toRemotePath } = require('./path-mapper');
  * @param {string} remote   - SSH target, e.g. 'user@host'
  */
 function patchChildProcess(fakeRoot, remote) {
-  const origSpawn       = cp.spawn.bind(cp);
-  const origSpawnSync   = cp.spawnSync.bind(cp);
-  const origExecSync    = cp.execSync.bind(cp);
+  const origSpawn        = cp.spawn.bind(cp);
+  const origSpawnSync    = cp.spawnSync.bind(cp);
+  const origExec         = cp.exec.bind(cp);
+  const origExecFile     = cp.execFile.bind(cp);
+  const origExecSync     = cp.execSync.bind(cp);
   const origExecFileSync = cp.execFileSync.bind(cp);
 
   /**
@@ -127,6 +129,48 @@ function patchChildProcess(fakeRoot, remote) {
     if (local) return origExecSync(command, opts);
 
     return origExecFileSync('ssh', buildSshArgsForShell(command, opts), Object.assign({}, opts, { cwd: undefined }));
+  };
+
+  // ── exec (async) ─────────────────────────────────────────────────────────────
+
+  cp.exec = function patchedExec(command, opts, callback) {
+    if (typeof opts === 'function') { callback = opts; opts = {}; }
+    opts = opts || {};
+
+    const cwd = effectiveCwd(opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    if (!fake) { dbg('exec', command.slice(0, 60), cwd, 'LOCAL(notFake)'); return origExec(command, opts, callback); }
+
+    const firstToken = String(command).trimStart().split(/\s+/)[0];
+    const firstTokenBase = firstToken.replace(/\.(exe|cmd|ps1|bat)$/i, '');
+    const local = isLocalOnly(firstToken) || (firstTokenBase !== firstToken && isLocalOnly(firstTokenBase));
+    dbg('exec', command.slice(0, 60), cwd, local ? 'LOCAL(isLocalOnly)' : 'SSH');
+    if (local) return origExec(command, opts, callback);
+
+    return origExec('ssh ' + buildSshArgsForShell(command, opts).map(function(a) {
+      return /\s/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a;
+    }).join(' '), Object.assign({}, opts, { cwd: undefined }), callback);
+  };
+
+  // ── execFile (async) ─────────────────────────────────────────────────────────
+
+  cp.execFile = function patchedExecFile(file, args, opts, callback) {
+    if (typeof args === 'function') { callback = args; args = []; opts = {}; }
+    else if (typeof opts === 'function') { callback = opts; opts = {}; }
+    if (!Array.isArray(args)) { opts = args; args = []; }
+    opts = opts || {};
+
+    const cwd = effectiveCwd(opts);
+    const fake = isFakePath(cwd, fakeRoot);
+    const local = isLocalOnly(file);
+    dbg('execFile', file, cwd, fake ? (local ? 'LOCAL(isLocalOnly)' : 'SSH') : 'LOCAL(notFake)');
+    if (!fake || local) return origExecFile(file, args, opts, callback);
+
+    // Build the SSH shell command and run via exec
+    const sshArgs = buildSshArgs(file, args, opts);
+    return origExec('ssh ' + sshArgs.map(function(a) {
+      return /\s/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a;
+    }).join(' '), Object.assign({}, opts, { cwd: undefined }), callback);
   };
 
   // ── execFileSync ─────────────────────────────────────────────────────────────
