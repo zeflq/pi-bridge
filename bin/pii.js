@@ -43,7 +43,7 @@ function findPi() {
       const cli = wrapper.replace(/\.(ps1|cmd)$/i, '.js');
       const localNode = path.join(basedir, 'node.exe');
       const nodeExe = fs.existsSync(localNode) ? localNode : process.execPath;
-      if (fs.existsSync(cli)) return { cli, nodeExe };
+      if (fs.existsSync(cli)) return { cli, nodeExe, binDir: basedir };
     } catch (_) {}
   }
 
@@ -63,10 +63,16 @@ if (!pi) {
   process.exit(1);
 }
 
+// Ensure pi can find itself in PATH when spawning sub-agents (e.g. Review).
+// On Windows custom installs, the bin directory is not always on PATH.
+const env = pi.binDir
+  ? Object.assign({}, process.env, { PATH: pi.binDir + path.delimiter + (process.env.PATH || '') })
+  : process.env;
+
 const result = spawnSync(
   pi.nodeExe,
   ['--require', preload, pi.cli, ...process.argv.slice(2)],
-  { stdio: 'inherit' }
+  { stdio: 'inherit', env }
 );
 
 process.exit(result.status ?? 1);

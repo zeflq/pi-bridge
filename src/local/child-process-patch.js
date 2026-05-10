@@ -35,7 +35,7 @@ function patchChildProcess(fakeRoot, remote) {
    */
   function normalizeCmd(file) {
     if (process.platform !== 'win32') return file;
-    return path.basename(String(file)).replace(/\.exe$/i, '');
+    return path.basename(String(file)).replace(/\.(exe|cmd|ps1|bat)$/i, '');
   }
 
   /**
@@ -47,7 +47,11 @@ function patchChildProcess(fakeRoot, remote) {
    */
   function isLocalOnly(file) {
     const name = normalizeCmd(file).toLowerCase();
-    return name === 'node' || name === 'pi' || name === 'pii';
+    // node/pi/pii: require local internet/auth
+    // where/which/powershell/cmd: PATH lookup and shell utilities must run locally
+    return name === 'node' || name === 'pi' || name === 'pii'
+        || name === 'where' || name === 'which'
+        || name === 'cmd' || name === 'powershell' || name === 'pwsh';
   }
 
   /**
@@ -108,6 +112,9 @@ function patchChildProcess(fakeRoot, remote) {
 
     const cwd = effectiveCwd(opts);
     if (!isFakePath(cwd, fakeRoot)) return origExecSync(command, opts);
+
+    const firstToken = String(command).trimStart().split(/\s+/)[0];
+    if (isLocalOnly(firstToken)) return origExecSync(command, opts);
 
     return origExecFileSync('ssh', buildSshArgsForShell(command, opts), Object.assign({}, opts, { cwd: undefined }));
   };
