@@ -13,9 +13,11 @@ const { isFakePath, toRemotePath } = require('./path-mapper');
  * @param {string} remote   - SSH target, e.g. 'user@host'
  */
 function patchChildProcess(fakeRoot, remote) {
-  const origSpawn       = cp.spawn.bind(cp);
-  const origSpawnSync   = cp.spawnSync.bind(cp);
-  const origExecSync    = cp.execSync.bind(cp);
+  const origSpawn        = cp.spawn.bind(cp);
+  const origSpawnSync    = cp.spawnSync.bind(cp);
+  const origExec         = cp.exec.bind(cp);
+  const origExecFile     = cp.execFile.bind(cp);
+  const origExecSync     = cp.execSync.bind(cp);
   const origExecFileSync = cp.execFileSync.bind(cp);
 
   /**
@@ -103,6 +105,43 @@ function patchChildProcess(fakeRoot, remote) {
     if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawnSync(file, args, opts);
 
     return origSpawnSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
+  };
+
+  // ── exec (async) ─────────────────────────────────────────────────────────────
+
+  cp.exec = function patchedExec(command, opts, callback) {
+    if (typeof opts === 'function') { callback = opts; opts = {}; }
+    opts = opts || {};
+
+    const cwd = effectiveCwd(opts);
+    if (!isFakePath(cwd, fakeRoot)) return origExec(command, opts, callback);
+
+    const firstToken = String(command).trimStart().split(/\s+/)[0];
+    if (isLocalOnly(firstToken)) return origExec(command, opts, callback);
+
+    const sshArgs = buildSshArgsForShell(command, opts);
+    const sshCmd = 'ssh ' + sshArgs.map(function(a) {
+      return /\s/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a;
+    }).join(' ');
+    return origExec(sshCmd, Object.assign({}, opts, { cwd: undefined }), callback);
+  };
+
+  // ── execFile (async) ─────────────────────────────────────────────────────────
+
+  cp.execFile = function patchedExecFile(file, args, opts, callback) {
+    if (typeof args === 'function') { callback = args; args = []; opts = {}; }
+    else if (typeof opts === 'function') { callback = opts; opts = {}; }
+    if (!Array.isArray(args)) { opts = args; args = []; }
+    opts = opts || {};
+
+    const cwd = effectiveCwd(opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origExecFile(file, args, opts, callback);
+
+    const sshArgs = buildSshArgs(file, args, opts);
+    const sshCmd = 'ssh ' + sshArgs.map(function(a) {
+      return /\s/.test(a) ? '"' + a.replace(/"/g, '\\"') + '"' : a;
+    }).join(' ');
+    return origExec(sshCmd, Object.assign({}, opts, { cwd: undefined }), callback);
   };
 
   // ── execSync ─────────────────────────────────────────────────────────────────
