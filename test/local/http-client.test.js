@@ -104,6 +104,14 @@ describe('http-client.js', () => {
     it('throws on 401 (wrong token)', () => {
       expect(() => httpPost(port, 'bad-token', '/echo', 'x')).toThrow();
     });
+
+    it('sends a body larger than 32 KB without ENAMETOOLONG', () => {
+      // Simulate a large session export — Windows command-line limit is ~32 KB.
+      // The body must travel via stdin, not embedded in the -e script arg.
+      const large = 'x'.repeat(100_000);
+      const result = httpPost(port, TOKEN, '/echo', large);
+      expect(result).toBe(large);
+    });
   });
 });
 

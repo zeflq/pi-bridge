@@ -93,31 +93,37 @@ req.on('error', (e) => {
  * @throws                 - On HTTP errors or non-2xx status codes
  */
 function httpPost(port, token, urlPath, body) {
+  // Body is passed via stdin (not embedded in the script) to avoid ENAMETOOLONG
+  // on Windows when writing large files such as session exports.
   const script = `
 const http = require('http');
-const body = ${JSON.stringify(body)};
-const bodyBuf = Buffer.from(body, 'utf8');
-let resBody = '';
-let statusCode = 0;
-const req = http.request(
-  { method:'POST', hostname:'127.0.0.1', port:${JSON.stringify(port)}, path:${JSON.stringify(urlPath)},
-    headers:{'x-token':${JSON.stringify(token)},'Content-Type':'text/plain; charset=utf-8','Content-Length':bodyBuf.length} },
-  (res) => {
-    statusCode = res.statusCode;
-    res.setEncoding('utf8');
-    res.on('data', (d) => { resBody += d; });
-    res.on('end', () => {
-      process.stdout.write(JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, body: resBody }));
-    });
-  }
-);
-req.on('error', (e) => {
-  process.stdout.write(JSON.stringify({ ok: false, status: 0, body: e.message }));
+let raw = '';
+process.stdin.setEncoding('utf8');
+process.stdin.on('data', (d) => { raw += d; });
+process.stdin.on('end', () => {
+  const bodyBuf = Buffer.from(raw, 'utf8');
+  let resBody = '';
+  let statusCode = 0;
+  const req = http.request(
+    { method:'POST', hostname:'127.0.0.1', port:${JSON.stringify(port)}, path:${JSON.stringify(urlPath)},
+      headers:{'x-token':${JSON.stringify(token)},'Content-Type':'text/plain; charset=utf-8','Content-Length':bodyBuf.length} },
+    (res) => {
+      statusCode = res.statusCode;
+      res.setEncoding('utf8');
+      res.on('data', (d) => { resBody += d; });
+      res.on('end', () => {
+        process.stdout.write(JSON.stringify({ ok: statusCode >= 200 && statusCode < 300, status: statusCode, body: resBody }));
+      });
+    }
+  );
+  req.on('error', (e) => {
+    process.stdout.write(JSON.stringify({ ok: false, status: 0, body: e.message }));
+  });
+  req.write(bodyBuf);
+  req.end();
 });
-req.write(bodyBuf);
-req.end();
 `;
-  const raw = withRetry(() => execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
+  const raw = withRetry(() => execFileSync(process.execPath, ['-e', script], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], input: body }));
   const result = JSON.parse(raw);
   if (!result.ok) {
     const err = new Error('HTTP ' + result.status + ': ' + result.body);
