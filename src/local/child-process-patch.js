@@ -51,6 +51,22 @@ function patchChildProcess(fakeRoot, remote) {
   }
 
   /**
+   * When pi spawns 'pi' or 'pii' as a subprocess (e.g. the /review skill),
+   * the bare command name won't be found in PATH on Windows because pi is a
+   * JS file located by pii's findPi(). pii.js sets PI_BRIDGE_CLI / PI_BRIDGE_NODE
+   * in the environment so we can resolve the correct executable here.
+   *
+   * Returns { nodeExe, cli } when applicable, null otherwise.
+   */
+  function resolvePiExe(file) {
+    const name = normalizeCmd(file).toLowerCase();
+    if (name !== 'pi' && name !== 'pii') return null;
+    const cli = process.env.PI_BRIDGE_CLI;
+    if (!cli) return null;
+    return { nodeExe: process.env.PI_BRIDGE_NODE || process.execPath, cli };
+  }
+
+  /**
    * Build SSH args for a file + args invocation:
    * cd to remote cwd, then run the command with shell-quoted arguments.
    */
@@ -84,7 +100,11 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawn(file, args, opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) {
+      const piExe = resolvePiExe(file);
+      if (piExe) return origSpawn(piExe.nodeExe, [piExe.cli, ...args], opts);
+      return origSpawn(file, args, opts);
+    }
 
     return origSpawn('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -96,7 +116,11 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origSpawnSync(file, args, opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) {
+      const piExe = resolvePiExe(file);
+      if (piExe) return origSpawnSync(piExe.nodeExe, [piExe.cli, ...args], opts);
+      return origSpawnSync(file, args, opts);
+    }
 
     return origSpawnSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };
@@ -119,7 +143,11 @@ function patchChildProcess(fakeRoot, remote) {
     opts = opts || {};
 
     const cwd = effectiveCwd(opts);
-    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) return origExecFileSync(file, args, opts);
+    if (!isFakePath(cwd, fakeRoot) || isLocalOnly(file)) {
+      const piExe = resolvePiExe(file);
+      if (piExe) return origExecFileSync(piExe.nodeExe, [piExe.cli, ...args], opts);
+      return origExecFileSync(file, args, opts);
+    }
 
     return origExecFileSync('ssh', buildSshArgs(file, args, opts), Object.assign({}, opts, { cwd: undefined }));
   };

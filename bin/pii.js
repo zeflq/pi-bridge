@@ -63,6 +63,11 @@ if (!pi) {
   process.exit(1);
 }
 
+// Expose resolved pi paths so child-process-patch can re-spawn pi correctly
+// when the review skill (or any internal tool) calls `pi` as a subprocess.
+process.env.PI_BRIDGE_CLI  = pi.cli;
+process.env.PI_BRIDGE_NODE = pi.nodeExe;
+
 const result = spawnSync(
   pi.nodeExe,
   ['--require', preload, pi.cli, ...process.argv.slice(2)],
