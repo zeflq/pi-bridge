@@ -162,6 +162,35 @@ describe('handlers.js', () => {
     });
   });
 
+  describe('POST /chmod', () => {
+    it('applies the mode, read as octal', async () => {
+      const filePath = path.join(tmpDir, 'chmod-me.sh');
+      fs.writeFileSync(filePath, '#!/bin/sh\n', 'utf8');
+      fs.chmodSync(filePath, 0o644);
+
+      const res = await callHandler('POST', '/chmod?path=' + encodeURIComponent(filePath) + '&mode=755');
+
+      expect(res._status).toBe(200);
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o755);
+    });
+
+    it('rejects a decimal mode, which would silently set the wrong bits', async () => {
+      const filePath = path.join(tmpDir, 'chmod-decimal.sh');
+      fs.writeFileSync(filePath, '', 'utf8');
+      fs.chmodSync(filePath, 0o644);
+
+      const res = await callHandler('POST', '/chmod?path=' + encodeURIComponent(filePath) + '&mode=493');
+
+      expect(res._status).toBe(400);
+      expect(fs.statSync(filePath).mode & 0o777).toBe(0o644);
+    });
+
+    it('400s without a mode', async () => {
+      const res = await callHandler('POST', '/chmod?path=' + encodeURIComponent(tmpDir));
+      expect(res._status).toBe(400);
+    });
+  });
+
   describe('POST /delete', () => {
     it('deletes a file', async () => {
       const filePath = path.join(tmpDir, 'delete-me.txt');

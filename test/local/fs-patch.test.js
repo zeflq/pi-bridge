@@ -10,6 +10,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
 const { patchFs } = require('../../src/local/fs-patch.js');
 
+// Captured before patchFs() replaces the methods, so tests can check the real disk.
+const realFs = { existsSync: fs.existsSync.bind(fs) };
+
 const TOKEN = 'fs-patch-test-token';
 let serverProcess;
 let port;
@@ -41,6 +44,13 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/exists') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('1');
+    return;
+  }
+  if (url.pathname === '/mkdtemp') {
+    // Mirrors the real handler: returns only the generated directory name.
+    const prefix = url.searchParams.get('path');
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(require('path').basename(prefix) + 'abc123');
     return;
   }
   // All POST endpoints
@@ -112,6 +122,22 @@ describe('fs-patch.js', () => {
 
     it('unlinkSync on fake path does not throw', () => {
       expect(() => fs.unlinkSync(fakePath())).not.toThrow();
+    });
+
+    it('mkdtempSync on fake path returns a suffixed path and creates it remotely', () => {
+      const prefix = path.join(fakeRoot, 'tmp-');
+      const dir = fs.mkdtempSync(prefix);
+      expect(dir).toBe(prefix + 'abc123');
+      // The local disk must stay untouched: the directory lives on the remote.
+      expect(realFs.existsSync(dir)).toBe(false);
+    });
+
+    it('chmodSync on fake path does not throw', () => {
+      expect(() => fs.chmodSync(fakePath(), 0o755)).not.toThrow();
+    });
+
+    it('rmdirSync on fake path does not throw', () => {
+      expect(() => fs.rmdirSync(path.join(fakeRoot, 'some-dir'), { recursive: true })).not.toThrow();
     });
 
     it('renameSync on fake path does not throw', () => {

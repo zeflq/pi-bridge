@@ -123,6 +123,32 @@ function createHandlers() {
         return;
       }
 
+      if (req.method === 'POST' && pathname === '/mkdtemp') {
+        const prefix = url.searchParams.get('path');
+        if (!prefix) return sendError(res, 400, 'Missing path parameter');
+        // Real mkdtemp, so uniqueness is the kernel's problem rather than a
+        // check-then-create race. Only the generated name is returned; the
+        // caller already knows the directory.
+        const created = fs.mkdtempSync(prefix);
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end(require('path').basename(created));
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/chmod') {
+        const p = url.searchParams.get('path');
+        const mode = url.searchParams.get('mode');
+        if (!p) return sendError(res, 400, 'Missing path parameter');
+        if (!mode) return sendError(res, 400, 'Missing mode parameter');
+        // The client always sends octal digits, so the wire value cannot be
+        // mistaken for a decimal bitmask.
+        if (!/^[0-7]{3,4}$/.test(mode)) return sendError(res, 400, 'Invalid mode parameter');
+        fs.chmodSync(p, parseInt(mode, 8));
+        res.writeHead(200, { 'Content-Type': 'text/plain' });
+        res.end('ok');
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/delete') {
         const p = url.searchParams.get('path');
         if (!p) return sendError(res, 400, 'Missing path parameter');

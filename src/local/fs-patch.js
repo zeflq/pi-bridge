@@ -97,6 +97,10 @@ function patchFs(fakeRoot, port, token) {
     renameSync:     fs.renameSync.bind(fs),
     copyFileSync:   fs.copyFileSync.bind(fs),
     realpathSync:   fs.realpathSync.bind(fs),
+    mkdtempSync:    fs.mkdtempSync.bind(fs),
+    rmdirSync:      fs.rmdirSync.bind(fs),
+    chmodSync:      fs.chmodSync.bind(fs),
+    cpSync:         fs.cpSync ? fs.cpSync.bind(fs) : undefined,
     createWriteStream: fs.createWriteStream.bind(fs),
     createReadStream:  fs.createReadStream.bind(fs),
   };
@@ -116,6 +120,11 @@ function patchFs(fakeRoot, port, token) {
     rename:     fs.promises.rename.bind(fs.promises),
     copyFile:   fs.promises.copyFile.bind(fs.promises),
     open:       fs.promises.open.bind(fs.promises),
+    mkdtemp:    fs.promises.mkdtemp.bind(fs.promises),
+    realpath:   fs.promises.realpath.bind(fs.promises),
+    rmdir:      fs.promises.rmdir.bind(fs.promises),
+    chmod:      fs.promises.chmod.bind(fs.promises),
+    cp:         fs.promises.cp ? fs.promises.cp.bind(fs.promises) : undefined,
   };
 
   // Resolve any path (relative or absolute) to absolute before checking fake root
@@ -244,6 +253,58 @@ function patchFs(fakeRoot, port, token) {
     const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return orig.mkdirSync(p, opts);
     httpPost(port, token, '/mkdir?path=' + encodeURIComponent(rpath(s)), '');
+  };
+
+  /**
+   * The remote runs the real mkdtempSync and returns only the generated
+   * directory name, so uniqueness keeps Node's semantics and no remote path has
+   * to be mapped back to a local one.
+   */
+  fs.mkdtempSync = function patchedMkdtempSync(prefix, opts) {
+    const s = abs(prefix);
+    if (!s || !isFakePath(s, fakeRoot)) return orig.mkdtempSync(prefix, opts);
+    const name = httpPost(port, token, '/mkdtemp?path=' + encodeURIComponent(rpath(s)), '');
+    return path.join(path.dirname(s), String(name).trim());
+  };
+
+  fs.rmdirSync = function patchedRmdirSync(p, opts) {
+    const s = abs(p);
+    if (!s || !isFakePath(s, fakeRoot)) return orig.rmdirSync(p, opts);
+    const recursive = (opts && opts.recursive) ? '1' : '0';
+    httpPost(port, token, '/rm?path=' + encodeURIComponent(rpath(s)) + '&recursive=' + recursive, '');
+  };
+
+  fs.chmodSync = function patchedChmodSync(p, mode) {
+    const s = abs(p);
+    if (!s || !isFakePath(s, fakeRoot)) return orig.chmodSync(p, mode);
+    // Octal on the wire: String(0o755) is "493", which the server would have to
+    // guess at. toString(8) keeps the intent explicit for numbers and strings.
+    const octal = typeof mode === 'number' ? mode.toString(8) : String(mode).replace(/^0o?/i, '');
+    httpPost(port, token, '/chmod?path=' + encodeURIComponent(rpath(s)) + '&mode=' + octal, '');
+  };
+
+  // Recursive copy: the remote /copy route handles one file, so directories are
+  // walked here through the already-patched calls.
+  fs.cpSync = function patchedCpSync(src, dest, opts) {
+    const srcS = abs(src);
+    const destS = abs(dest);
+    const involved = (srcS && isFakePath(srcS, fakeRoot)) || (destS && isFakePath(destS, fakeRoot));
+    if (!involved) {
+      if (!orig.cpSync) throw new Error('fs.cpSync is not available in this Node version');
+      return orig.cpSync(src, dest, opts);
+    }
+    const stats = fs.statSync(srcS);
+    if (!stats.isDirectory()) {
+      fs.copyFileSync(srcS, destS);
+      return;
+    }
+    if (!(opts && opts.recursive)) {
+      throw Object.assign(new Error('EISDIR: illegal operation on a directory, cp ' + srcS), { code: 'EISDIR' });
+    }
+    fs.mkdirSync(destS, { recursive: true });
+    for (const entry of fs.readdirSync(srcS)) {
+      fs.cpSync(path.join(srcS, entry), path.join(destS, entry), opts);
+    }
   };
 
   fs.unlinkSync = function patchedUnlinkSync(p) {
@@ -501,6 +562,56 @@ function patchFs(fakeRoot, port, token) {
     });
   };
 
+  fs.promises.rename = async function patchedRename(from, to) {
+    const fromS = abs(from);
+    const toS   = abs(to);
+    if (!fromS || !isFakePath(fromS, fakeRoot)) return origP.rename(from, to);
+    await new Promise(function(resolve, reject) {
+      const req = http.request(
+        { method: 'POST', hostname: '127.0.0.1', port: port,
+          path: '/rename?from=' + encodeURIComponent(rpath(fromS)) + '&to=' + encodeURIComponent(toS ? rpath(toS) : String(to)),
+          headers: { 'x-token': token, 'Content-Length': 0 } },
+        function(res) { res.resume(); res.on('end', function() { res.statusCode < 300 ? resolve() : reject(new Error('HTTP ' + res.statusCode)); }); }
+      );
+      req.on('error', reject); req.end();
+    });
+  };
+
+  fs.promises.mkdtemp = async function patchedMkdtemp(prefix, opts) {
+    const s = abs(prefix);
+    if (!s || !isFakePath(s, fakeRoot)) return origP.mkdtemp(prefix, opts);
+    return fs.mkdtempSync(prefix, opts);
+  };
+
+  fs.promises.realpath = async function patchedRealpath(p, opts) {
+    const s = abs(p);
+    if (!s || !isFakePath(s, fakeRoot)) return origP.realpath(p, opts);
+    return s;
+  };
+
+  fs.promises.rmdir = async function patchedRmdir(p, opts) {
+    const s = abs(p);
+    if (!s || !isFakePath(s, fakeRoot)) return origP.rmdir(p, opts);
+    return fs.promises.rm(p, Object.assign({}, opts));
+  };
+
+  fs.promises.chmod = async function patchedChmod(p, mode) {
+    const s = abs(p);
+    if (!s || !isFakePath(s, fakeRoot)) return origP.chmod(p, mode);
+    fs.chmodSync(p, mode);
+  };
+
+  fs.promises.cp = async function patchedCp(src, dest, opts) {
+    const srcS = abs(src);
+    const destS = abs(dest);
+    const involved = (srcS && isFakePath(srcS, fakeRoot)) || (destS && isFakePath(destS, fakeRoot));
+    if (!involved) {
+      if (!origP.cp) throw new Error('fs.promises.cp is not available in this Node version');
+      return origP.cp(src, dest, opts);
+    }
+    fs.cpSync(src, dest, opts);
+  };
+
   // fs.promises.open: return a minimal FileHandle for reading
   fs.promises.open = async function patchedOpen(p, flags, mode) {
     const s = typeof p === 'string' ? abs(p) : null;
@@ -651,6 +762,12 @@ function patchFs(fakeRoot, port, token) {
   fsp.mkdir      = fs.promises.mkdir;
   fsp.rm         = fs.promises.rm;
   fsp.unlink     = fs.promises.unlink;
+  fsp.rename     = fs.promises.rename;
+  fsp.mkdtemp    = fs.promises.mkdtemp;
+  fsp.realpath   = fs.promises.realpath;
+  fsp.rmdir      = fs.promises.rmdir;
+  fsp.chmod      = fs.promises.chmod;
+  fsp.cp         = fs.promises.cp;
   fsp.copyFile   = fs.promises.copyFile;
   fsp.open       = fs.promises.open;
 }
