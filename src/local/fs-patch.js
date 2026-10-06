@@ -129,12 +129,14 @@ function patchFs(fakeRoot, port, token) {
   };
 
   // Resolve any path (relative or absolute) to absolute before checking fake root.
-  // URL and Buffer paths are accepted too: jiti's bundled ESM resolver probes
-  // package mains with fs.statSync(new URL(...)), which must reach the remote.
+  // file: URLs are accepted too: jiti's bundled ESM resolver probes package
+  // mains with fs.statSync(new URL(...)), which must reach the remote.
+  // Buffer paths deliberately pass through: Node 20's JS rmSync walks children
+  // as Buffers via the public fs.*, and routing those would make removeFakeDir
+  // list and delete files on the remote.
   function abs(p) {
     if (typeof p === 'string') return path.resolve(p);
     if (p instanceof URL) return p.protocol === 'file:' ? path.resolve(fileURLToPath(p)) : null;
-    if (Buffer.isBuffer(p)) return path.resolve(p.toString());
     return null;
   }
 
