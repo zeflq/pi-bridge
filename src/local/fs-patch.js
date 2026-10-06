@@ -4,6 +4,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const http = require('http');
 const path = require('path');
+const { fileURLToPath } = require('url');
 const { isFakePath, toRemotePath } = require('./path-mapper');
 const { httpGet, httpPost } = require('./http-client');
 
@@ -127,9 +128,26 @@ function patchFs(fakeRoot, port, token) {
     cp:         fs.promises.cp ? fs.promises.cp.bind(fs.promises) : undefined,
   };
 
-  // Resolve any path (relative or absolute) to absolute before checking fake root
+  // Resolve any path (relative or absolute) to absolute before checking fake root.
+  // URL and Buffer paths are accepted too: jiti's bundled ESM resolver probes
+  // package mains with fs.statSync(new URL(...)), which must reach the remote.
   function abs(p) {
-    return typeof p === 'string' ? path.resolve(p) : null;
+    if (typeof p === 'string') return path.resolve(p);
+    if (p instanceof URL) return p.protocol === 'file:' ? path.resolve(fileURLToPath(p)) : null;
+    if (Buffer.isBuffer(p)) return path.resolve(p.toString());
+    return null;
+  }
+
+  // Shared by statSync/lstatSync. Honours { throwIfNoEntry: false }, which the
+  // ESM resolver relies on to probe candidate files without try/catch.
+  function statRemoteSync(s, opts) {
+    try {
+      return makeStats(JSON.parse(httpGet(port, token, '/stat?path=' + encodeURIComponent(rpath(s)))));
+    } catch (e) {
+      const missing = e && e.message && (e.message.includes('ENOENT') || e.message.includes('403'));
+      if (missing && opts && opts.throwIfNoEntry === false) return undefined;
+      rethrowRemote(e, s);
+    }
   }
 
   function rpath(fakePath) {
@@ -229,17 +247,13 @@ function patchFs(fakeRoot, port, token) {
   fs.statSync = function patchedStatSync(p, opts) {
     const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return orig.statSync(p, opts);
-    try {
-      return makeStats(JSON.parse(httpGet(port, token, '/stat?path=' + encodeURIComponent(rpath(s)))));
-    } catch (e) { rethrowRemote(e, s); }
+    return statRemoteSync(s, opts);
   };
 
   fs.lstatSync = function patchedLstatSync(p, opts) {
     const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return orig.lstatSync(p, opts);
-    try {
-      return makeStats(JSON.parse(httpGet(port, token, '/stat?path=' + encodeURIComponent(rpath(s)))));
-    } catch (e) { rethrowRemote(e, s); }
+    return statRemoteSync(s, opts);
   };
 
   fs.writeFileSync = function patchedWriteFileSync(p, data, opts) {
@@ -359,7 +373,7 @@ function patchFs(fakeRoot, port, token) {
 
   // createReadStream: read entire file from remote, pipe as stream
   fs.createReadStream = function patchedCreateReadStream(p, opts) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return orig.createReadStream(p, opts);
     const { Readable } = require('stream');
     const stream = new Readable({ read() {} });
@@ -372,7 +386,7 @@ function patchFs(fakeRoot, port, token) {
 
   // createWriteStream: buffer writes, POST on finish
   fs.createWriteStream = function patchedCreateWriteStream(p, opts) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return orig.createWriteStream(p, opts);
     const { Writable } = require('stream');
     const chunks = [];
@@ -402,7 +416,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.promises.readFile = async function patchedReadFile(p, opts) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return origP.readFile(p, opts);
     try {
       const body = await httpGetAsync(port, token, '/read?path=' + encodeURIComponent(rpath(s)));
@@ -416,7 +430,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.promises.readdir = async function patchedReaddir(p, opts) {
-    const s = typeof p === 'string' ? abs(p) : p.toString();
+    const s = abs(p) || p.toString();
     if (!isFakePath(s, fakeRoot)) return origP.readdir(p, opts);
     try {
       const withFileTypes = opts && opts.withFileTypes;
@@ -465,7 +479,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.promises.writeFile = async function patchedWriteFile(p, data, opts) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return origP.writeFile(p, data, opts);
     const content = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
     await new Promise(function(resolve, reject) {
@@ -517,7 +531,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.promises.appendFile = async function patchedAppendFile(p, data, opts) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return origP.appendFile(p, data, opts);
     const content = Buffer.isBuffer(data) ? data.toString('utf8') : String(data);
     const buf = Buffer.from(content, 'utf8');
@@ -614,7 +628,7 @@ function patchFs(fakeRoot, port, token) {
 
   // fs.promises.open: return a minimal FileHandle for reading
   fs.promises.open = async function patchedOpen(p, flags, mode) {
-    const s = typeof p === 'string' ? abs(p) : null;
+    const s = abs(p);
     if (!s || !isFakePath(s, fakeRoot)) return origP.open(p, flags, mode);
     // Fetch the file content eagerly; return a minimal FileHandle-like object
     const content = await httpGetAsync(port, token, '/read?path=' + encodeURIComponent(rpath(s)));
@@ -646,7 +660,7 @@ function patchFs(fakeRoot, port, token) {
   const watchFilePollers = new Map();
 
   fs.watch = function patchedWatch(filename, opts, listener) {
-    const s = abs(typeof filename === 'string' ? filename : null);
+    const s = abs(filename);
     if (!s || !isFakePath(s, fakeRoot)) return origWatch(filename, opts, listener);
 
     if (typeof opts === 'function') { listener = opts; opts = {}; }
@@ -711,7 +725,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.watchFile = function patchedWatchFile(filename, opts, listener) {
-    const s = abs(typeof filename === 'string' ? filename : null);
+    const s = abs(filename);
     if (!s || !isFakePath(s, fakeRoot)) {
       return origWatchFile ? origWatchFile(filename, opts, listener) : undefined;
     }
@@ -741,7 +755,7 @@ function patchFs(fakeRoot, port, token) {
   };
 
   fs.unwatchFile = function patchedUnwatchFile(filename, listener) {
-    const s = abs(typeof filename === 'string' ? filename : null);
+    const s = abs(filename);
     if (!s || !isFakePath(s, fakeRoot)) {
       return origUnwatchFile ? origUnwatchFile(filename, listener) : undefined;
     }

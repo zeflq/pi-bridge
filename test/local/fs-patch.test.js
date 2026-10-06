@@ -4,7 +4,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
+import { fileURLToPath, pathToFileURL } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -44,6 +44,15 @@ const server = http.createServer((req, res) => {
   if (url.pathname === '/exists') {
     res.writeHead(200, { 'Content-Type': 'text/plain' });
     res.end('1');
+    return;
+  }
+  if (url.pathname === '/stat') {
+    if (url.searchParams.get('path').endsWith('/missing')) {
+      res.writeHead(404); res.end('Not found: ENOENT');
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ isFile: true, isDirectory: false, size: 14, mtimeMs: 0 }));
     return;
   }
   if (url.pathname === '/mkdtemp') {
@@ -138,6 +147,25 @@ describe('fs-patch.js', () => {
 
     it('rmdirSync on fake path does not throw', () => {
       expect(() => fs.rmdirSync(path.join(fakeRoot, 'some-dir'), { recursive: true })).not.toThrow();
+    });
+
+    // jiti's bundled ESM resolver probes package mains this way (e.g. jszip's
+    // extensionless "main"), so a URL path must still be routed to the remote.
+    it('statSync on a file: URL under the fake root hits the remote', () => {
+      const st = fs.statSync(pathToFileURL(fakePath()));
+      expect(st.isFile()).toBe(true);
+      expect(st.size).toBe(14);
+    });
+
+    it('statSync with throwIfNoEntry: false returns undefined for a missing remote file', () => {
+      const missing = path.join(fakeRoot, 'missing');
+      expect(fs.statSync(missing, { throwIfNoEntry: false })).toBeUndefined();
+      expect(fs.lstatSync(pathToFileURL(missing), { throwIfNoEntry: false })).toBeUndefined();
+      expect(() => fs.statSync(missing)).toThrow(/ENOENT/);
+    });
+
+    it('readFileSync on a file: URL under the fake root hits the remote', () => {
+      expect(fs.readFileSync(pathToFileURL(fakePath()), 'utf8')).toBe('remote content');
     });
 
     it('renameSync on fake path does not throw', () => {
