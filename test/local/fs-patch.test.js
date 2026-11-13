@@ -192,5 +192,20 @@ describe('fs-patch.js', () => {
       // A path that definitely doesn't exist
       expect(fs.existsSync(path.join(tmpDir, 'definitely-not-here-xyz.txt'))).toBe(false);
     });
+
+    it('on win32, access checks for a local bash path succeed without touching disk', async () => {
+      const desc = Object.getOwnPropertyDescriptor(process, 'platform');
+      Object.defineProperty(process, 'platform', { value: 'win32' });
+      try {
+        const bash = path.join(tmpDir, 'no-such-git', 'bin', 'bash.exe');
+        expect(() => fs.accessSync(bash, fs.constants.X_OK)).not.toThrow();
+        await expect(fs.promises.access(bash, fs.constants.X_OK)).resolves.toBeUndefined();
+        expect(fs.existsSync(bash)).toBe(true);
+      } finally {
+        Object.defineProperty(process, 'platform', desc);
+      }
+      // Off Windows the same path falls through to the real filesystem.
+      expect(() => fs.accessSync(path.join(tmpDir, 'no-such-git', 'bin', 'bash.exe'))).toThrow();
+    });
   });
 });

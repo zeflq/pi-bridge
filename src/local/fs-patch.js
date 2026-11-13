@@ -235,6 +235,9 @@ function patchFs(fakeRoot, port, token) {
 
   fs.accessSync = function patchedAccessSync(p, mode) {
     const s = abs(p);
+    // Same Windows bash fake as existsSync: newer pi probes the shell with
+    // accessSync, which would otherwise hit the local disk and fail.
+    if (process.platform === 'win32' && isBashPath(s)) return;
     if (!s || !isFakePath(s, fakeRoot)) return orig.accessSync(p, mode);
     try {
       const exists = httpGet(port, token, '/exists?path=' + encodeURIComponent(rpath(s))).trim() === '1';
@@ -406,6 +409,7 @@ function patchFs(fakeRoot, port, token) {
 
   fs.promises.access = async function patchedAccess(p, mode) {
     const s = abs(p);
+    if (process.platform === 'win32' && isBashPath(s)) return;
     if (!s || !isFakePath(s, fakeRoot)) return origP.access(p, mode);
     try {
       const exists = (await httpGetAsync(port, token, '/exists?path=' + encodeURIComponent(rpath(s)))).trim() === '1';
